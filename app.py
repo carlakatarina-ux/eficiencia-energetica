@@ -1113,8 +1113,6 @@ if "Visão Geral" in pagina:
 
 elif "Unidades" in pagina:
 
-    st.error("TESTE 2026 - CÓDIGO NOVO EM EXECUÇÃO")
-
     st.markdown("""
         <p style="margin:0; color:#64748b; font-size:13px;">
             Gestão por Unidade
