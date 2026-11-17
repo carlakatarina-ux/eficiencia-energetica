@@ -2065,7 +2065,7 @@ elif pagina == "📊  Indicadores":
         yaxis=dict(
             title="",
             categoryorder="array",
-            categoryarray=unidades[::-1]
+            categoryarray=df_periodo_atual["unidade"].dropna().unique().tolist()[::-1]
         )
     )
 
