@@ -1113,6 +1113,8 @@ if "Visão Geral" in pagina:
 
 elif "Unidades" in pagina:
 
+    st.error("TESTE 2026 - CÓDIGO NOVO EM EXECUÇÃO")
+
     st.markdown("""
         <p style="margin:0; color:#64748b; font-size:13px;">
             Gestão por Unidade
@@ -1136,32 +1138,53 @@ elif "Unidades" in pagina:
         </p>
     """, unsafe_allow_html=True)
 
+    
+    
     # ============================================
-    # SELETORES DE UNIDADE E PERÍODO
+    # SELEÇÃO DINÂMICA DE UNIDADE E PERÍODO
     # ============================================
 
     col_filtro, col_periodo, col_espaco = st.columns([2, 2, 3])
 
+    conexao = conectar_banco()
+
+    df_lista_unidades = pd.read_sql_query(
+        """
+        SELECT DISTINCT TRIM(unidade) AS unidade
+        FROM dados_energia
+        WHERE unidade IS NOT NULL
+          AND TRIM(unidade) <> ''
+        ORDER BY unidade
+        """,
+        conexao
+    )
+
+    conexao.close()
+
+    unidades = df_lista_unidades["unidade"].tolist()
+
+    if not unidades:
+        st.warning("Nenhuma unidade cadastrada no banco.")
+        st.stop()
+
     with col_filtro:
         unidade_selecionada = st.selectbox(
             "Selecione a unidade",
-            [
-                "Plataforma A",
-                "Plataforma B",
-                "Terminal C",
-                "Refinaria D",
-                "Base E"
-            ]
+            options=unidades,
+            key="unidade_operacional_corrigida"
         )
 
-    # Busca os períodos cadastrados para a unidade selecionada
+    # ============================================
+    # CONSULTAR PERÍODOS DA UNIDADE
+    # ============================================
+
     conexao = conectar_banco()
 
     df_periodos = pd.read_sql_query(
         """
-        SELECT mes, ano
+        SELECT DISTINCT mes, ano
         FROM dados_energia
-        WHERE unidade = ?
+        WHERE TRIM(unidade) = ?
         ORDER BY ano DESC, mes DESC
         """,
         conexao,
@@ -1170,111 +1193,88 @@ elif "Unidades" in pagina:
 
     conexao.close()
 
+    if df_periodos.empty:
+        st.warning("Esta unidade não possui períodos cadastrados.")
+        st.stop()
+
+    meses = {
+        1: "Jan", 2: "Fev", 3: "Mar",
+        4: "Abr", 5: "Mai", 6: "Jun",
+        7: "Jul", 8: "Ago", 9: "Set",
+        10: "Out", 11: "Nov", 12: "Dez"
+    }
+
+    opcoes_periodo = [
+        (int(linha["mes"]), int(linha["ano"]))
+        for _, linha in df_periodos.iterrows()
+    ]
+
     with col_periodo:
-
-        if not df_periodos.empty:
-
-            meses_abreviados = {
-                1: "Jan",
-                2: "Fev",
-                3: "Mar",
-                4: "Abr",
-                5: "Mai",
-                6: "Jun",
-                7: "Jul",
-                8: "Ago",
-                9: "Set",
-                10: "Out",
-                11: "Nov",
-                12: "Dez"
-            }
-
-            opcoes_periodo = [
-                f"{meses_abreviados[int(linha['mes'])]}/{int(linha['ano'])}"
-                for _, linha in df_periodos.iterrows()
-            ]
-
-            periodo_selecionado = st.selectbox(
-                "Período",
-                opcoes_periodo
-            )
-
-        else:
-            periodo_selecionado = None
-            st.selectbox(
-                "Período",
-                ["Sem dados cadastrados"],
-                disabled=True
-            )
-
-    # ============================================
-    # BUSCA OS DADOS DA UNIDADE E PERÍODO
-    # ============================================
-
-    if periodo_selecionado is not None:
-
-        meses_numero = {
-            "Jan": 1,
-            "Fev": 2,
-            "Mar": 3,
-            "Abr": 4,
-            "Mai": 5,
-            "Jun": 6,
-            "Jul": 7,
-            "Ago": 8,
-            "Set": 9,
-            "Out": 10,
-            "Nov": 11,
-            "Dez": 12
-        }
-
-        mes_texto, ano_texto = periodo_selecionado.split("/")
-
-        mes_selecionado = meses_numero[mes_texto]
-        ano_selecionado = int(ano_texto)
-
-        conexao = conectar_banco()
-
-        df_unidade = pd.read_sql_query(
-            """
-            SELECT *
-            FROM dados_energia
-            WHERE unidade = ?
-            AND mes = ?
-            AND ano = ?
-            LIMIT 1
-            """,
-            conexao,
-            params=(
-                unidade_selecionada,
-                mes_selecionado,
-                ano_selecionado
-            )
+        periodo = st.selectbox(
+            "Período",
+            options=opcoes_periodo,
+            format_func=lambda p: f"{meses[p[0]]}/{p[1]}",
+            key=f"periodo_unidade_{unidade_selecionada}"
         )
 
-        conexao.close()
+    mes_selecionado, ano_selecionado = periodo
 
-        if not df_unidade.empty:
+    # ============================================
+    # CONSULTAR DADOS DA UNIDADE
+    # ============================================
 
-            registro = df_unidade.iloc[0]
+    conexao = conectar_banco()
 
-            dados = {
-                "consumo": float(registro["consumo"]),
-                "producao": float(registro["producao"]),
-                "area": float(registro["area"]),
-                "usuarios": int(registro["usuarios"]),
-                "compressores": float(registro["compressores"]),
-                "bombas": float(registro["bombas"]),
-                "refrigeracao": float(registro["refrigeracao"]),
-                "iluminacao": float(registro["iluminacao"]),
-                "outros": float(registro["outros"])
-            }
+    df_unidade = pd.read_sql_query(
+        """
+        SELECT *
+        FROM dados_energia
+        WHERE TRIM(unidade) = ?
+          AND mes = ?
+          AND ano = ?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        conexao,
+        params=(
+            unidade_selecionada,
+            mes_selecionado,
+            ano_selecionado
+        )
+    )
 
-            dados["eficiencia"] = (
-                dados["consumo"] / dados["producao"]
-                if dados["producao"] > 0
-                else 0
-            )
+    conexao.close()
+
+    if df_unidade.empty:
+        st.warning("Não existem dados para o período selecionado.")
+        st.stop()
+
+    registro = df_unidade.iloc[0]
+
+    def numero(valor):
+        return 0 if pd.isna(valor) else float(valor)
+
+    dados = {
+        "consumo": numero(registro["consumo"]),
+        "producao": numero(registro["producao"]),
+        "area": numero(registro["area"]),
+        "usuarios": int(numero(registro["usuarios"])),
+        "compressores": numero(registro["compressores"]),
+        "bombas": numero(registro["bombas"]),
+        "refrigeracao": numero(registro["refrigeracao"]),
+        "iluminacao": numero(registro["iluminacao"]),
+        "outros": numero(registro["outros"])
+    }
+
+    if dados["producao"] <= 0:
+        st.warning("A produção deve ser maior que zero.")
+        st.stop()
+
+    dados["eficiencia"] = dados["consumo"] / dados["producao"]
+
+
+
+
 
     # ========================================
     # CARDS DA UNIDADE
@@ -1329,7 +1329,7 @@ elif "Unidades" in pagina:
             ano,
             consumo
         FROM dados_energia
-        WHERE unidade = ?
+        WHERE TRIM(unidade) = ?
         ORDER BY ano ASC, mes ASC
         """,
         conexao,
@@ -1504,121 +1504,72 @@ elif "Unidades" in pagina:
             use_container_width=True
         )
 
+   
     # ------------------------------------------
-    # DIAGNÓSTICOS
+    # DIAGNÓSTICOS DINÂMICOS
     # ------------------------------------------
 
-    diagnosticos = {
+    principal_equipamento = df_equipamentos.loc[
+        df_equipamentos["Percentual"].idxmax(),
+        "Equipamento"
+    ]
 
-        "Plataforma A": {
-            "status": "EFICIENTE",
-            "cor": "#159957",
-            "fundo": "#E8F7EF",
-            "icone": "🟢",
-            "principal": "Bombas",
-            "texto": "A unidade apresenta bom desempenho energético em relação às demais instalações.",
-            "recomendacao": "Manter o acompanhamento dos equipamentos e as práticas atuais de eficiência."
-        },
+    diag = {}
 
-        "Plataforma B": {
-            "status": "ATENÇÃO",
-            "cor": "#D98A00",
-            "fundo": "#FFF4D9",
-            "icone": "🟠",
-            "principal": "Compressores",
-            "texto": "O consumo específico indica oportunidade de melhoria na eficiência operacional.",
-            "recomendacao": "Avaliar o funcionamento dos compressores e possíveis perdas durante a operação."
-        },
-
-        "Terminal C": {
-            "status": "EFICIENTE",
-            "cor": "#159957",
-            "fundo": "#E8F7EF",
-            "icone": "🟢",
-            "principal": "Bombas",
-            "texto": "Mesmo com alto consumo total, a produção elevada mantém um bom nível de eficiência energética.",
-            "recomendacao": "Monitorar o sistema de bombeamento para preservar o desempenho atual."
-        },
-
-        "Refinaria D": {
-            "status": "ATENÇÃO",
-            "cor": "#D98A00",
-            "fundo": "#FFF4D9",
-            "icone": "🟠",
-            "principal": "Sistemas Térmicos",
-            "texto": "A unidade apresenta consumo específico elevado em comparação com unidades de desempenho semelhante.",
-            "recomendacao": "Priorizar a análise dos sistemas térmicos, responsáveis pela maior parcela do consumo."
-        },
-
-        "Base E": {
-            "status": "INEFICIENTE",
-            "cor": "#D64545",
-            "fundo": "#FDECEC",
-            "icone": "🔴",
-            "principal": "Compressores",
-            "texto": "A unidade apresenta o maior consumo específico entre as instalações analisadas.",
-            "recomendacao": "Realizar uma avaliação energética dos equipamentos e investigar perdas operacionais."
-        }
-    }
-
-    diag = diagnosticos[unidade_selecionada]
-
-    # Atualiza o principal ponto de atenção com os dados do período selecionado
-    diag = diag.copy()
-    diag["principal"] = principal_equipamento
-
-    # Define o status automaticamente pelo consumo específico
+    # Define o diagnóstico pelo consumo específico
     if consumo_especifico <= 4.5:
+
         diag["status"] = "EFICIENTE"
         diag["cor"] = "#159957"
         diag["fundo"] = "#E8F7EF"
         diag["icone"] = "🟢"
 
+        diag["texto"] = (
+            "A unidade apresenta bom desempenho energético no período "
+            "analisado, mantendo o consumo específico dentro da meta."
+        )
+
+        diag["recomendacao"] = (
+            f"Manter o acompanhamento dos equipamentos e monitorar "
+            f"{principal_equipamento}, responsável pela maior parcela do consumo."
+        )
+
     elif consumo_especifico <= 6.0:
+
         diag["status"] = "ATENÇÃO"
         diag["cor"] = "#D98A00"
         diag["fundo"] = "#FFF4D9"
         diag["icone"] = "🟠"
 
+        diag["texto"] = (
+            "O consumo específico está acima da meta estabelecida, "
+            "indicando oportunidade de melhoria na eficiência operacional."
+        )
+
+        diag["recomendacao"] = (
+            f"Avaliar o funcionamento de {principal_equipamento} e investigar "
+            "possíveis perdas ou oportunidades de redução do consumo."
+        )
+
     else:
+
         diag["status"] = "INEFICIENTE"
         diag["cor"] = "#D64545"
         diag["fundo"] = "#FDE8E8"
         diag["icone"] = "🔴"
 
-    # Define texto e recomendação automaticamente conforme o status
-    if consumo_especifico <= 4.5:
         diag["texto"] = (
-            "A unidade apresenta bom desempenho energético no período analisado, "
-            "mantendo o consumo específico dentro da meta estabelecida."
+            "A unidade apresenta consumo específico elevado no período "
+            "analisado, indicando necessidade de atenção ao desempenho energético."
         )
 
         diag["recomendacao"] = (
-            f"Manter o acompanhamento dos equipamentos e monitorar o consumo de "
-            f"{principal_equipamento}, atualmente responsável pela maior parcela do consumo."
+            f"Priorizar uma avaliação energética de {principal_equipamento} "
+            "e dos processos associados, buscando identificar desperdícios "
+            "e possíveis ações corretivas."
         )
 
-    elif consumo_especifico <= 6.0:
-        diag["texto"] = (
-            "O consumo específico está acima da meta estabelecida, indicando "
-            "oportunidade de melhoria na eficiência operacional."
-        )
-
-        diag["recomendacao"] = (
-            f"Avaliar o funcionamento de {principal_equipamento} e investigar "
-            f"possíveis perdas ou oportunidades de redução do consumo."
-        )
-
-    else:
-        diag["texto"] = (
-            "A unidade apresenta consumo específico elevado no período analisado, "
-            "indicando necessidade de atenção ao desempenho energético."
-        )
-
-        diag["recomendacao"] = (
-            f"Priorizar uma avaliação energética de {principal_equipamento} e dos "
-            f"processos associados, buscando identificar desperdícios e possíveis ações corretivas."
-        )
+    diag["principal"] = principal_equipamento
 
 
     # ------------------------------------------
@@ -2116,13 +2067,7 @@ elif pagina == "📊  Indicadores":
         yaxis=dict(
             title="",
             categoryorder="array",
-            categoryarray=[
-                "Base E",
-                "Refinaria D",
-                "Terminal C",
-                "Plataforma B",
-                "Plataforma A"
-            ]
+            categoryarray=unidades[::-1]
         )
     )
 
@@ -2961,15 +2906,27 @@ elif pagina == "⚙️  Configurações":
         col1, col2, col3 = st.columns(3)
 
         with col1:
+            conexao = conectar_banco()
+
+        df_unidades = pd.read_sql_query(
+            """
+            SELECT DISTINCT unidade
+            FROM dados_energia
+            WHERE unidade IS NOT NULL
+            ORDER BY unidade
+            """,
+            conexao
+        )
+
+        conexao.close()
+
+        lista_unidades = df_unidades["unidade"].tolist()
+
+        with col1:
             unidade = st.selectbox(
                 "Unidade",
-                [
-                    "Plataforma A",
-                    "Plataforma B",
-                    "Terminal C",
-                    "Refinaria D",
-                    "Base E"
-                ]
+                options=lista_unidades,
+                key="unidade_cadastro_dinamica"
             )
 
         with col2:
@@ -3094,7 +3051,7 @@ elif pagina == "⚙️  Configurações":
             cursor.execute("""
                 SELECT id
                 FROM dados_energia
-                WHERE unidade = ?
+                WHERE TRIM(unidade) = ?
                 AND mes = ?
                 AND ano = ?
             """, (
@@ -3844,7 +3801,7 @@ elif pagina == "⚙️  Configurações":
                             cursor.execute("""
                                 SELECT id
                                 FROM dados_energia
-                                WHERE unidade = ?
+                                WHERE TRIM(unidade) = ?
                                 AND mes = ?
                                 AND ano = ?
                             """, (
